@@ -1,5 +1,8 @@
 #include <iostream>
 #include <sys/fcntl.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <unistd.h>
 #include <sys/mman.h>
 
@@ -15,51 +18,46 @@ int main() {
     } else {
         std::cout << "Segment deleted" << std::endl;
     }*/
+    // via scmget get segment and deny access for other users
 
+    if (shmget(0, 4096, IPC_CREAT | IPC_EXCL | 0666) == -1) {
+        std::cerr << "Error: cannot create segment" << std::endl;
+        return 1;
+    }
+
+    // shmctl(int shmid, int cmd, struct shmid_ds *buf)
+    // lock segment
+
+    if(shmctl(0, SHM_LOCK, NULL) == -1) {
+        std::cerr << "Error: cannot lock segment" << std::endl;
+        return 1;
+    }
+
+    // shared memory oblect elaw only one running process can access it
     // create shared memory object
-    int fd = shm_open("/my_shm", O_RDWR | O_CREAT, 0666);
-    if (fd == -1) {
-        std::cerr << "Error: cannot open shared memory object" << std::endl;
+    const int SIZE = 4096;
+    const char* name = "/my_shm";
+    int shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) {
+        std::cerr << "Error: cannot create shared memory object" << std::endl;
         return 1;
     }
-    // check if segment is created
-    if (EEXIST == errno) {
-        std::cerr << "Error: segment is already created" << std::endl;
-        return 1;
-    }
-
-    if (EACCES == errno) {
-        std::cerr << "Error: EACCES" << std::endl;
-        return 1;
-    }
-
-    // reject copy of the running it
-    ftruncate(fd, 4096);
-    // map shared memory object to the address space of the process
-    char *ptr = (char *) mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    // configure the size of the shared memory object
+    ftruncate(shm_fd, SIZE);
+    // memory map the shared memory object
+    void* ptr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (ptr == MAP_FAILED) {
         std::cerr << "Error: cannot map shared memory object" << std::endl;
         return 1;
     }
-    // write to the shared memory object via write()
-    write(fd, "Hello, world!", 14);
-    // write to the shared memory object via ptr
-   /* ptr[0] = 'H';
-    ptr[1] = 'e';
-    ptr[2] = 'l';
-    ptr[3] = 'l';
-    ptr[4] = 'o';
-    ptr[5] = '\0';
-    write (fd, ptr, 6);*/
-
-    // synchronize changes
-    msync(ptr, 4096, MS_SYNC);
-    // unmap shared memory object
-    //munmap(ptr, 4096);
-    // close shared memory object
-    //close(fd);
-    // remove shared memory object
-    //shm_unlink("/my_shm");
-
+    // write to the shared memory object
+    sprintf((char*)ptr, "Hello, World!");
+    // remove the shared memory object
+    if (shm_unlink(name) == -1) {
+        std::cerr << "Error: cannot delete segment" << std::endl;
+        return 1;
+    } else {
+        std::cout << "Segment deleted" << std::endl;
+    }
     return 0;
 }
